@@ -193,6 +193,32 @@ class VirusTotal(object):
             report = Report(req, self)
 
         return report
+
+    def get_raw(self, anything, filename = None):
+        logger.info("Get report of %r" % (anything, ))
+        o = self._fileobj_to_fcontent(anything, filename)
+
+        if o[0] == "file":
+            o = (
+                "resource",
+                hashlib.sha256(o[2]).hexdigest(),
+                o[2],
+            )
+
+        data = urllib.urlencode({
+            "apikey": self.api_key,
+            "resource": o[1],
+        })
+
+        self._limit_call_handler()
+        req = urllib2.urlopen(urllib2.Request(
+           "http://www.virustotal.com/vtapi/v2/file/report",
+            data,
+        )).read()
+
+        report = json.loads(req)
+
+        return report
     
     def scan(self, anything, filename = None, reanalyze = None):
         reanalyze = reanalyze if reanalyze is not None else False
@@ -324,6 +350,7 @@ A resource can be:
 - a filepath or URL""")
     parser.add_option("-k", "--key", dest = "api_key", default = None, help = "Set VirusTotal API key.")
     parser.add_option("-l", "--limit", dest = "limit_per_min", default = "4", help = "Set limit per minute API call. VirusTotal specifies no more 4 API calls must be done per minute. You can change this value, but VirusTotal maybe ignores some calls and may make this script bug.")
+    parser.add_option("-r", "--raw", dest = "return_raw", action = "store_true", default = False, help = "Return raw json.")
     parser.add_option("-v", "--verbose", dest = "verbose", action = "store_true", default = False, help = "Verbose.")
     (options, arguments) = parser.parse_args()
 
@@ -342,7 +369,7 @@ A resource can be:
     
     action = arguments.pop(0)
 
-    if action.lower() not in ("scan", "get", ):
+    if action.lower() not in ("scan", "get", "get_raw", ):
         print "ERROR: unknown action"
         return -1
 
@@ -361,6 +388,10 @@ A resource can be:
             elif action.lower() == "get":
                 report = v.get(resource)
                 q.put((resource, report))
+
+            elif action.lower() == "get_raw":
+                report = v.get_raw(resource)
+                q.put(report)
         
         except VirusTotal.ApiError:
             print "VirusTotal returned a non correct response. It may be because the script does too many requests at the minute. See the parameter -l"
@@ -382,21 +413,25 @@ A resource can be:
                 return
 
     while not q.empty():
-        resource, report = q.get()
+
+        if options.return_raw:
+            report = q.get()
+            print json.dumps(report, sort_keys=False, indent=4)
+        else:
+            resource, report = q.get()
         
-        print "=== %s ===" % (resource, )
+            print "=== %s ===" % (resource, )
 
-        if report is None:
-            print "No report is available."
-            return 0
+            if report is None:
+                print "No report is available."
+                return 0
 
-        print "Report:"
-        print ' {a1:<20} | {a2:<15} | {a3:<8} | {v:<}'.format(a1='Scanner',a2='EngineVersion',a3='DB Date',v='Virus')
-        print ' {s:->20} | {s:->15} | {s:->8} | {s:->28}'.format(s='')
-        for antivirus, virus in report:
-            print ' {a1:<20} | {a2:<15} | {a3:<8} | {v:<}'.format(a1=antivirus[0], a2=antivirus[1], a3=antivirus[2], v=virus,)
-        print
+            print "Report:"
+            print ' {a1:<20} | {a2:<15} | {a3:<8} | {v:<}'.format(a1='Scanner',a2='EngineVersion',a3='DB Date',v='Virus')
+            print ' {s:->20} | {s:->15} | {s:->8} | {s:->28}'.format(s='')
+            for antivirus, virus in report:
+                print ' {a1:<20} | {a2:<15} | {a3:<8} | {v:<}'.format(a1=antivirus[0], a2=antivirus[1], a3=antivirus[2], v=virus,)
+            print
 
 if __name__ == "__main__":
     main()
-
